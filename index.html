@@ -215,7 +215,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{ outline:3px solid var(
       </div>
       <div class="row subnav">
         <button class="btn btn--ghost btn--sm" id="btn-resultados">Ver resultados</button>
-        <button class="btn btn--ghost btn--sm" id="btn-sorteo">Sorteo de desempate</button>
+        <button class="btn btn--ghost btn--sm" id="btn-sorteo">Panel del organizador</button>
       </div>
     </div>
   </header>
@@ -267,6 +267,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{ outline:3px solid var(
       <div class="levels__head" style="padding-top:30px">
         <h2 class="levels__title">Elige tu nivel</h2>
         <p class="levels__sub" id="niveles-saludo">Toca una tarjeta para empezar.</p>
+        <p class="hint" id="niveles-msg" style="color:var(--gold); min-height:22px"></p>
       </div>
       <div class="levels__grid" id="levels-play"></div>
       <div style="text-align:center; margin-top:30px">
@@ -332,6 +333,27 @@ a:focus-visible,button:focus-visible,input:focus-visible{ outline:3px solid var(
     <div class="row">
       <button class="btn" id="admin-entrar">Entrar</button>
       <button class="btn btn--ghost" data-goto="screen-inicio">Volver</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== PANEL DEL ORGANIZADOR ===================== -->
+<section class="screen" id="screen-admin-panel">
+  <div class="pane wrap">
+    <h2 class="pane__title">Panel del organizador</h2>
+    <p class="pane__sub">Estado del juego: <strong id="admin-estado">—</strong></p>
+    <div class="row" style="margin-bottom:18px">
+      <button class="btn" id="admin-abrir">Abrir juego</button>
+      <button class="btn btn--ghost" id="admin-cerrar">Cerrar juego</button>
+    </div>
+    <div class="status" id="admin-msg"></div>
+    <div class="row">
+      <button class="btn btn--ghost btn--sm" id="admin-resultados">Ver resultados</button>
+      <button class="btn btn--ghost btn--sm" id="admin-ir-sorteo">Sorteo de desempate</button>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn btn--ghost btn--sm" id="admin-borrar">Borrar todos los resultados</button>
+      <button class="btn btn--ghost btn--sm" data-goto="screen-inicio">Inicio</button>
     </div>
   </div>
 </section>
@@ -2669,14 +2691,14 @@ const CONFIG = {
 
   // URL /exec de tu Web App de Google Apps Script (ver instrucciones).
   // Mientras esté vacía, el juego funciona pero NO guarda puntajes.
-  apiUrl: "",
+  apiUrl: "https://script.google.com/a/macros/auditcaats.com/s/AKfycbyZs3lOWAJyFogfL531nx70jNEhp6M-naj9npvWW8w0Ib__GGqPErMug2ioYP4dHXJ-/exec",
 
   // URL para el QR. Vacía = usa esta misma página (ideal en GitHub Pages).
   urlJuego: "",
 
-  // Clave para entrar al SORTEO (solo el organizador). Cámbiala por la tuya.
-  // Protección sencilla del lado del navegador: evita que otros abran el
-  // sorteo, pero no es seguridad de nivel bancario. Déjala "" para no pedir clave.
+  // Clave del organizador. Sirve para entrar al panel y para autorizar
+  // abrir/cerrar/borrar el juego en línea. DEBE ser igual a ADMIN_TOKEN
+  // del Codigo.gs. Cámbiala por la tuya (en ambos archivos). "" = sin clave.
   adminClave: "mundial2026"
 };
 
@@ -2747,6 +2769,10 @@ function jsonp(params){
 }
 function guardarResultado(p){ return jsonp({ action:'save', nombre:p.nombre, nivel:p.nivel, aciertos:p.aciertos, total:p.total }); }
 function listarResultados(){ return jsonp({ action:'list' }); }
+function consultarEstado(){ return jsonp({ action:'estado' }); }
+function abrirJuego(){ return jsonp({ action:'abrir', token:CONFIG.adminClave }); }
+function cerrarJuego(){ return jsonp({ action:'cerrar', token:CONFIG.adminClave }); }
+function borrarResultados(){ return jsonp({ action:'reset', token:CONFIG.adminClave }); }
 
 // Cálculos del marcador (puros, fáciles de mantener)
 function mejorPorJugador(rows){
@@ -2800,6 +2826,22 @@ function continuarRegistro(){
 
 /* ================= QUIZ ================= */
 function empezar(nivelId){
+  // Modo práctica (sin marcador en línea): juega sin verificar
+  if(!CONFIG.apiUrl || !CONFIG.apiUrl.trim()){ iniciarQuiz(nivelId); return; }
+  const msg = document.getElementById('niveles-msg');
+  msg.textContent = 'Verificando...';
+  consultarEstado().then(est=>{
+    if(!est || !est.abierto){ msg.textContent = 'El juego aún no está abierto. Espera a que el organizador lo inicie.'; return; }
+    return listarResultados().then(rows=>{
+      const yo = estado.jugador.trim().toLowerCase();
+      const ya = (rows||[]).some(r => String(r.nombre||'').trim().toLowerCase()===yo && String(r.nivel)===nivelId);
+      if(ya){ msg.textContent = `Ya jugaste el nivel ${nombreNivel(nivelId)}. No se puede repetir.`; return; }
+      msg.textContent = '';
+      iniciarQuiz(nivelId);
+    });
+  }).catch(()=>{ msg.textContent = 'No se pudo verificar con el marcador. Revisa tu conexión.'; });
+}
+function iniciarQuiz(nivelId){
   estado.nivel = nivelId; estado.idx = 0; estado.aciertos = 0;
   irA('screen-quiz'); pintarPregunta();
 }
@@ -2860,7 +2902,11 @@ function mostrarResultado(){
   }
   st.textContent = "Guardando tu puntaje...";
   guardarResultado({ nombre:estado.jugador, nivel:estado.nivel, aciertos:a, total:total })
-    .then(()=>{ st.textContent = "Puntaje guardado en el marcador."; })
+    .then(resp=>{
+      if(resp && resp.ok===false && resp.repetido){ st.textContent = "Ya tenías un puntaje en este nivel; se conservó el primero."; }
+      else if(resp && resp.ok===false && resp.cerrado){ st.textContent = "El juego está cerrado; este puntaje no se guardó."; }
+      else { st.textContent = "Puntaje guardado en el marcador."; }
+    })
     .catch(()=>{ st.textContent = "No se pudo guardar (revisa tu conexión). Intenta de nuevo desde 'Jugar otra vez'."; });
 }
 
@@ -2984,10 +3030,10 @@ function abrirQR(){
 }
 function cerrarQR(){ document.getElementById('qrModal').classList.remove('open'); }
 
-/* ================= ADMIN (puerta del sorteo) ================= */
+/* ================= ADMIN (panel del organizador) ================= */
 let adminDesbloqueado = false;
 function abrirSorteo(){
-  if(adminDesbloqueado || !CONFIG.adminClave){ irA('screen-sorteo'); cargarDatosSorteo(); return; }
+  if(adminDesbloqueado || !CONFIG.adminClave){ irA('screen-admin-panel'); refrescarEstadoAdmin(); return; }
   document.getElementById('admin-hint').textContent = '';
   document.getElementById('admin-clave').value = '';
   irA('screen-admin');
@@ -2998,8 +3044,35 @@ function entrarAdmin(){
   const hint = document.getElementById('admin-hint');
   if(CONFIG.adminClave && inp.value === CONFIG.adminClave){
     adminDesbloqueado = true; hint.textContent = '';
-    irA('screen-sorteo'); cargarDatosSorteo();
+    irA('screen-admin-panel'); refrescarEstadoAdmin();
   } else { hint.textContent = 'Clave incorrecta.'; inp.focus(); inp.select(); }
+}
+function refrescarEstadoAdmin(){
+  const el = document.getElementById('admin-estado');
+  const msg = document.getElementById('admin-msg');
+  if(!CONFIG.apiUrl || !CONFIG.apiUrl.trim()){ el.textContent = 'sin conexión (configura apiUrl)'; return; }
+  el.textContent = 'consultando...';
+  consultarEstado().then(est=>{ el.textContent = (est && est.abierto) ? 'ABIERTO' : 'CERRADO'; })
+    .catch(()=>{ el.textContent = 'no se pudo consultar'; });
+}
+function setEstadoJuego(abrir){
+  const msg = document.getElementById('admin-msg');
+  if(!CONFIG.apiUrl || !CONFIG.apiUrl.trim()){ msg.textContent = 'Configura apiUrl para usar el marcador en línea.'; return; }
+  msg.textContent = abrir ? 'Abriendo...' : 'Cerrando...';
+  (abrir ? abrirJuego() : cerrarJuego()).then(resp=>{
+    if(resp && resp.error==='token'){ msg.textContent = 'Clave no autorizada (revisa que adminClave y ADMIN_TOKEN coincidan).'; }
+    else { msg.textContent = abrir ? 'Juego abierto. Ya pueden jugar.' : 'Juego cerrado.'; refrescarEstadoAdmin(); }
+  }).catch(()=>{ msg.textContent = 'No se pudo cambiar el estado.'; });
+}
+function pedirBorrar(){
+  const msg = document.getElementById('admin-msg');
+  if(!CONFIG.apiUrl || !CONFIG.apiUrl.trim()){ msg.textContent = 'Configura apiUrl para usar el marcador en línea.'; return; }
+  if(!window.confirm('¿Borrar TODOS los resultados? Esto no se puede deshacer.')) return;
+  msg.textContent = 'Borrando...';
+  borrarResultados().then(resp=>{
+    if(resp && resp.error==='token'){ msg.textContent = 'Clave no autorizada.'; }
+    else { msg.textContent = 'Resultados borrados.'; }
+  }).catch(()=>{ msg.textContent = 'No se pudieron borrar.'; });
 }
 
 /* ================= ARRANQUE / EVENTOS ================= */
@@ -3015,6 +3088,11 @@ document.getElementById('btn-resultados').addEventListener('click', ()=>{ irA('s
 document.getElementById('btn-sorteo').addEventListener('click', abrirSorteo);
 document.getElementById('admin-entrar').addEventListener('click', entrarAdmin);
 document.getElementById('admin-clave').addEventListener('keydown', e=>{ if(e.key==='Enter') entrarAdmin(); });
+document.getElementById('admin-abrir').addEventListener('click', ()=> setEstadoJuego(true));
+document.getElementById('admin-cerrar').addEventListener('click', ()=> setEstadoJuego(false));
+document.getElementById('admin-borrar').addEventListener('click', pedirBorrar);
+document.getElementById('admin-resultados').addEventListener('click', ()=>{ irA('screen-resultados'); cargarMarcador(); });
+document.getElementById('admin-ir-sorteo').addEventListener('click', ()=>{ irA('screen-sorteo'); cargarDatosSorteo(); });
 document.getElementById('r-again').addEventListener('click', ()=> empezar(estado.nivel));
 document.getElementById('r-levels').addEventListener('click', ()=> irA('screen-niveles'));
 document.getElementById('r-board').addEventListener('click', ()=>{ irA('screen-resultados'); cargarMarcador(); });
