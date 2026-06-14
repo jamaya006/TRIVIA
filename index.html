@@ -40,6 +40,37 @@ a:focus-visible,button:focus-visible,input:focus-visible{ outline:3px solid var(
 
 #confeti{ position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:9999; }
 
+/* Overlay de estrés (rojo) que aparece en los últimos segundos */
+#stress{ position:fixed; inset:0; pointer-events:none; z-index:9990; opacity:0; transition:opacity .25s ease;
+  background:radial-gradient(120% 120% at 50% 50%, transparent 52%, rgba(223,8,20,.34) 100%);
+  box-shadow:inset 0 0 160px 50px rgba(223,8,20,.55); }
+body.stress #stress{ opacity:1; animation:pulseRed .7s ease-in-out infinite; }
+@keyframes pulseRed{ 0%,100%{ opacity:.6; } 50%{ opacity:1; } }
+
+/* Temporizador con anillo, en su propio espacio centrado */
+.quiz__timer{ display:flex; flex-direction:column; align-items:center; gap:7px; margin:8px 0 24px; }
+.timerring{ width:96px; height:96px; border-radius:50%; display:grid; place-items:center;
+  background:conic-gradient(var(--qc,var(--gold)) calc(var(--p,100)*1%), rgba(255,255,255,.12) 0);
+  transition:background .12s linear; }
+.timerring__inner{ width:78px; height:78px; border-radius:50%; background:#04121b;
+  display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-mono); font-weight:700; font-size:34px; color:var(--ink); }
+.timerlabel{ font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-soft); }
+
+/* Selección de habilidad (registro) */
+.habpick{ display:grid; gap:10px; max-width:420px; margin:0 auto 8px; }
+.habopt{ text-align:left; cursor:pointer; background:rgba(255,255,255,.05); border:1.5px solid rgba(255,255,255,.14); color:var(--ink); padding:12px 14px; border-radius:12px; transition:border-color .15s, background .15s; }
+.habopt strong{ display:block; font-size:15px; }
+.habopt span{ font-size:13px; color:var(--ink-soft); }
+.habopt.sel{ border-color:var(--gold); background:rgba(245,159,0,.14); }
+/* Botón/uso de habilidad en el quiz */
+.quiz__hab{ margin-top:16px; text-align:center; min-height:42px; }
+.hab-lock{ font-size:13px; color:var(--ink-soft); }
+body.stress .timerring{ background:conic-gradient(var(--bad) calc(var(--p,100)*1%), rgba(223,8,20,.20) 0); animation:pulseBadge .6s ease-in-out infinite; }
+body.stress .timerring__inner{ color:#fff; }
+@keyframes pulseBadge{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.10); } }
+@media (prefers-reduced-motion:reduce){ body.stress #stress{ animation:none; opacity:1; } body.stress .timerring{ animation:none; } }
+
 .screen{ display:none; }
 .screen.active{ display:block; animation:fade .35s ease; }
 @keyframes fade{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;} }
@@ -179,6 +210,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{ outline:3px solid var(
 <body>
 
 <canvas id="confeti"></canvas>
+<div id="stress" aria-hidden="true"></div>
 
 <div class="modal" id="qrModal" role="dialog" aria-modal="true" aria-label="Código QR">
   <div class="modal__box">
@@ -252,6 +284,8 @@ a:focus-visible,button:focus-visible,input:focus-visible{ outline:3px solid var(
     <h2 class="pane__title">¿Quién juega?</h2>
     <p class="pane__sub">Escribe tu nombre para guardar tu puntaje en el marcador.</p>
     <input class="field" id="reg-nombre" type="text" maxlength="40" placeholder="Tu nombre" autocomplete="off">
+    <p class="pane__sub" style="margin:14px 0 8px">Elige tu habilidad (se activa en la pregunta 5):</p>
+    <div class="habpick" id="hab-pick"></div>
     <div class="hint" id="reg-hint"></div>
     <div class="row">
       <button class="btn" id="reg-continuar">Continuar</button>
@@ -285,9 +319,16 @@ a:focus-visible,button:focus-visible,input:focus-visible{ outline:3px solid var(
       <span class="quiz__score" id="q-score"></span>
     </div>
     <div class="bar"><div class="bar__fill" id="q-bar"></div></div>
+    <div class="quiz__timer">
+      <div class="timerring" id="q-ring" style="--p:100">
+        <div class="timerring__inner" id="q-timer">6</div>
+      </div>
+      <span class="timerlabel">segundos</span>
+    </div>
     <div class="q__num" id="q-num"></div>
     <div class="q__text" id="q-text"></div>
     <div class="opts" id="q-opts"></div>
+    <div class="quiz__hab" id="q-hab"></div>
     <div class="quiz__foot" id="q-foot"></div>
   </div>
 </section>
@@ -2689,9 +2730,13 @@ const CONFIG = {
   premioMedio:  "Dos llaveros mundialistas",
   premioPro:    "La Copa del Mundo",
 
+  // Tiempo por pregunta (segundos) y umbral en que la pantalla se pone roja
+  segundosPorPregunta: 6,
+  segundosEstres: 3,
+
   // URL /exec de tu Web App de Google Apps Script (ver instrucciones).
   // Mientras esté vacía, el juego funciona pero NO guarda puntajes.
-  apiUrl: "https://script.google.com/macros/s/AKfycby2rYMrlaZjBv8iPmLhnWIyFMiM8H-7oUIQw3xIgUaOOHrg7TgnbuQkeVc_r8lny0qE/exec",
+  apiUrl: "https://script.google.com/macros/s/AKfycbxAKuwyBhUgNFAfJPBMoehQj8rusYxi5rtz415_t9roKcYnT03oayU-FTA3qXPkLGd6/exec",
 
   // URL para el QR. Vacía = usa esta misma página (ideal en GitHub Pages).
   urlJuego: "",
@@ -2742,9 +2787,19 @@ const NIVELES = [
 ];
 const nombreNivel = id => (NIVELES.find(n=>n.id===id)||{}).nombre || id;
 
+/* Habilidades (cada jugador elige UNA; se activa en la pregunta 5) */
+const HABILIDADES = [
+  { id:'mitad',     nombre:'Quitar un error',     desc:'Elimina dos opciones incorrectas (50/50).' },
+  { id:'tiempo',    nombre:'Tiempo extra',         desc:'Suma 5 segundos en la pregunta actual.' },
+  { id:'repechaje', nombre:'Segunda oportunidad',  desc:'Si fallas, tienes un intento más.' }
+];
+let habElegida = null;
+function registrarJugador(n){ return jsonp({ action:'registrar', nombre:n }); }
+
 /* ================= NAVEGACIÓN ================= */
-let estado = { nivel:null, idx:0, aciertos:0, jugador:"" };
+let estado = { nivel:null, idx:0, aciertos:0, jugador:"", habilidad:null, habilidadUsada:false, repechajeArmado:false, repechajePregunta:-1, repechajeUsado:false };
 function irA(id){
+  if(typeof detenerTemporizador === 'function') detenerTemporizador();
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   try{ window.scrollTo(0,0); }catch(e){}
@@ -2813,15 +2868,37 @@ function pintarInvitacion(){
 }
 
 /* ================= REGISTRO ================= */
+function pintarHabilidades(){
+  const cont = document.getElementById('hab-pick'); if(!cont) return;
+  cont.innerHTML = '';
+  HABILIDADES.forEach(h=>{
+    const b = document.createElement('button');
+    b.className = 'habopt'; b.dataset.id = h.id;
+    b.innerHTML = `<strong>${h.nombre}</strong><span>${h.desc}</span>`;
+    b.addEventListener('click', ()=>{
+      habElegida = h.id;
+      document.querySelectorAll('#hab-pick .habopt').forEach(x=> x.classList.toggle('sel', x.dataset.id===h.id));
+    });
+    cont.appendChild(b);
+  });
+}
+function irNiveles(nombre){
+  document.getElementById('niveles-saludo').textContent = `${nombre}, toca una tarjeta para empezar.`;
+  irA('screen-niveles');
+}
 function continuarRegistro(){
   const inp = document.getElementById('reg-nombre');
   const hint = document.getElementById('reg-hint');
   const nombre = inp.value.trim();
   if(nombre.length < 2){ hint.textContent = "Escribe tu nombre para continuar."; inp.focus(); return; }
-  hint.textContent = "";
-  estado.jugador = nombre;
-  document.getElementById('niveles-saludo').textContent = `${nombre}, toca una tarjeta para empezar.`;
-  irA('screen-niveles');
+  if(!habElegida){ hint.textContent = "Elige una habilidad."; return; }
+  estado.jugador = nombre; estado.habilidad = habElegida;
+  if(!CONFIG.apiUrl || !CONFIG.apiUrl.trim()){ hint.textContent=''; irNiveles(nombre); return; }
+  hint.textContent = "Registrando...";
+  registrarJugador(nombre).then(resp=>{
+    if(resp && resp.ok===false && resp.lleno){ hint.textContent = "El grupo está completo (máximo 20 jugadores)."; return; }
+    hint.textContent = ''; irNiveles(nombre);
+  }).catch(()=>{ hint.textContent = ''; irNiveles(nombre); }); // si falla la verificación, deja jugar
 }
 
 /* ================= QUIZ ================= */
@@ -2843,6 +2920,7 @@ function empezar(nivelId){
 }
 function iniciarQuiz(nivelId){
   estado.nivel = nivelId; estado.idx = 0; estado.aciertos = 0;
+  estado.habilidadUsada = false; estado.repechajeArmado = false; estado.repechajePregunta = -1; estado.repechajeUsado = false;
   irA('screen-quiz'); pintarPregunta();
 }
 function pintarPregunta(){
@@ -2861,9 +2939,85 @@ function pintarPregunta(){
     const b = document.createElement('button'); b.className='opt'; b.textContent=texto;
     b.addEventListener('click', ()=> responder(i,b)); cont.appendChild(b);
   });
+  iniciarTemporizador();
+  renderHabilidad();
+}
+
+/* ================= HABILIDADES (en el quiz) ================= */
+const PREGUNTA_DESBLOQUEO = 5; // se activan a partir de la pregunta 5
+function renderHabilidad(){
+  const cont = document.getElementById('q-hab'); if(!cont) return;
+  cont.innerHTML = '';
+  if(!estado.habilidad) return;
+  const h = HABILIDADES.find(x=>x.id===estado.habilidad);
+  if(estado.idx < PREGUNTA_DESBLOQUEO - 1){
+    cont.innerHTML = `<span class="hab-lock">Habilidad "${h.nombre}" se desbloquea en la pregunta ${PREGUNTA_DESBLOQUEO}</span>`;
+    return;
+  }
+  if(estado.habilidadUsada){ cont.innerHTML = `<span class="hab-lock">Habilidad ya usada</span>`; return; }
+  const b = document.createElement('button');
+  b.className = 'btn btn--ghost btn--sm';
+  b.textContent = 'Usar: ' + h.nombre;
+  b.addEventListener('click', usarHabilidad);
+  cont.appendChild(b);
+}
+function usarHabilidad(){
+  if(estado.habilidadUsada) return;
+  const id = estado.habilidad;
+  if(id === 'mitad'){ quitarDosErrores(); estado.habilidadUsada = true; }
+  else if(id === 'tiempo'){ qDeadline += 5000; estado.habilidadUsada = true; }
+  else if(id === 'repechaje'){ estado.habilidadUsada = true; estado.repechajeArmado = true; estado.repechajePregunta = estado.idx; estado.repechajeUsado = false; }
+  renderHabilidad();
+  if(id === 'repechaje'){ document.getElementById('q-hab').innerHTML = '<span class="hab-lock">Segunda oportunidad activa: si fallas, intentas de nuevo</span>'; }
+}
+function quitarDosErrores(){
+  const p = PREGUNTAS[estado.nivel][estado.idx];
+  const opts = Array.prototype.slice.call(document.querySelectorAll('#q-opts .opt'));
+  const malas = opts.filter((b,i)=> i !== p.r && !b.disabled);
+  for(let i=malas.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=malas[i]; malas[i]=malas[j]; malas[j]=t; }
+  malas.slice(0,2).forEach(b=>{ b.disabled = true; b.style.opacity = '0.32'; });
+}
+
+/* ================= TEMPORIZADOR POR PREGUNTA ================= */
+let qTimer = null, qDeadline = 0;
+function iniciarTemporizador(){
+  detenerTemporizador();
+  const seg = Number(CONFIG.segundosPorPregunta) || 6;
+  qDeadline = Date.now() + seg * 1000;
+  actualizarTemporizador();
+  qTimer = setInterval(actualizarTemporizador, 100);
+}
+function detenerTemporizador(){
+  if(qTimer){ clearInterval(qTimer); qTimer = null; }
+  document.body.classList.remove('stress');
+}
+function actualizarTemporizador(){
+  const seg = Number(CONFIG.segundosPorPregunta) || 6;
+  const umbral = Number(CONFIG.segundosEstres) || 3;
+  const ms = Math.max(0, qDeadline - Date.now());
+  const restante = ms / 1000;
+  const badge = document.getElementById('q-timer');
+  if(badge) badge.textContent = Math.ceil(restante);
+  const ring = document.getElementById('q-ring');
+  if(ring) ring.style.setProperty('--p', (ms/(seg*1000))*100);
+  document.body.classList.toggle('stress', restante <= umbral && ms > 0);
+  if(ms <= 0){ detenerTemporizador(); tiempoAgotado(); }
+}
+function tiempoAgotado(){
+  const badge = document.getElementById('q-timer'); if(badge) badge.textContent = '0';
+  responder(-1); // -1 = nadie respondió: cuenta como fallada y revela la correcta
 }
 function responder(elegida){
   const banco = PREGUNTAS[estado.nivel], p = banco[estado.idx];
+  // Segunda oportunidad: el primer fallo (clic) no bloquea; el tiempo sigue corriendo
+  if(estado.repechajeArmado && estado.repechajePregunta === estado.idx && !estado.repechajeUsado && elegida !== -1 && elegida !== p.r){
+    estado.repechajeUsado = true;
+    const opts = document.querySelectorAll('#q-opts .opt');
+    opts[elegida].classList.add('wrong'); opts[elegida].disabled = true;
+    document.getElementById('q-hab').innerHTML = '<span class="hab-lock">Segunda oportunidad: intenta de nuevo</span>';
+    return;
+  }
+  detenerTemporizador();
   document.querySelectorAll('#q-opts .opt').forEach((b,i)=>{
     b.disabled = true;
     if(i===p.r) b.classList.add('correct');
@@ -2873,7 +3027,9 @@ function responder(elegida){
   const esUltima = estado.idx === banco.length-1;
   const btn = document.createElement('button'); btn.className='btn'; btn.textContent = esUltima?'Ver resultado':'Siguiente';
   btn.addEventListener('click', ()=>{ if(esUltima){ mostrarResultado(); } else { estado.idx++; pintarPregunta(); } });
-  document.getElementById('q-foot').appendChild(btn);
+  const foot = document.getElementById('q-foot'); foot.innerHTML = '';
+  if(elegida===-1){ const aviso = document.createElement('span'); aviso.className='q__num'; aviso.style.marginRight='12px'; aviso.textContent='Se acabó el tiempo.'; foot.appendChild(aviso); }
+  foot.appendChild(btn);
 }
 
 /* ================= RESULTADO + GUARDADO ================= */
@@ -3077,6 +3233,7 @@ function pedirBorrar(){
 
 /* ================= ARRANQUE / EVENTOS ================= */
 pintarInvitacion();
+pintarHabilidades();
 initSorteoTabs();
 document.getElementById('btn-jugar').addEventListener('click', ()=>{ irA('screen-registro'); setTimeout(()=>document.getElementById('reg-nombre').focus(),50); });
 document.getElementById('reg-continuar').addEventListener('click', continuarRegistro);
